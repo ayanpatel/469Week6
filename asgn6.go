@@ -5,30 +5,39 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"sort"
 	"crypto/md5"
+	"encoding/binary"
 )
 
 const numNodes = 5
 
+type message struct {
+	dest string
+	key string
+	value int
+}
+
 type Ring struct {
 	Nodes Nodes
+	messageChan chan message
 }
 
 type Nodes []*Node
 
 type Node struct {
 	Id string
-	HashId int
+	HashId uint64
 }
 
-func hashId(key string) []byte {
-	return md5.Sum([]byte(key))
+func hashId(key string) uint64 {
+	s := md5.Sum([]byte(key))
+	h := binary.LittleEndian.Uint64(s[:])
+	return h
 }
 
 func NewRing() *Ring {
-	return &Ring{Nodes : Nodes{}}
+	return &Ring{Nodes : Nodes{}, messageChan : make(chan message, 32)}
 }
 
 func NewNode(id string) *Node {
@@ -39,6 +48,7 @@ func (r *Ring) AddNode(id string) {
 	node := NewNode(id)
 	r.Nodes = append(r.Nodes, node)
 	sort.Sort(r.Nodes)
+	go nodeRoutine(id, r.messageChan)
 }
 
 func (r *Ring) DeleteNode(id string) {
@@ -63,13 +73,13 @@ func (n Nodes) Swap(i, j int) {
 
 func (r *Ring) search(id string) int {
 	searchFn := func(i int) bool {
-		return r.Nodes[i].HashId > hashId(key)
+		return r.Nodes[i].HashId >= hashId(id)
 	}
 	return sort.Search(r.Nodes.Len(), searchFn)
 }
 
 func (r *Ring) Get(key string) string {
-	i := r.search(id)
+	i := r.search(key)
 	if i >= r.Nodes.Len() {
 		i = 0
 	}
@@ -77,7 +87,27 @@ func (r *Ring) Get(key string) string {
 }
 
 func (r *Ring) Put(key string, value int) {
+	var m message
+	m.dest = r.Get(key)
+	m.key = key
+	m.value = value
+	r.messageChan <- m
+}
 
+func nodeRoutine(id string, messageChan chan message) {
+	db := make(map[string]int)
+
+	for {
+		select {
+		case recvMessage := <- messageChan:
+			if recvMessage.dest == id {
+				db[recvMessage.key] = recvMessage.value
+			} else {
+				messageChan <- recvMessage
+			}
+		default:
+		}
+	}
 }
 
 func main() {
@@ -87,5 +117,14 @@ func main() {
 	r.AddNode("C")
 	r.AddNode("D")
 	r.AddNode("E")
-	
+
+	r.Put("Maria", 10)
+
+	n_id := r.Get("Maria")
+	fmt.Println("Maria at node", n_id)
+
+	r.DeleteNode("E")
+
+	n_id = r.Get("Maria")
+	fmt.Println("Maria at node", n_id)
 }
