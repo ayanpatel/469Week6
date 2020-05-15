@@ -7,11 +7,13 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
+	"math"
 	"sort"
 )
 
+const numNodes = 5
 const tokensPerNode = 4
+const numPartitions = numNodes * tokensPerNode
 
 type message struct {
 	dest string
@@ -58,11 +60,31 @@ func NewNode(id string) *Node {
 	return n
 }
 
+func (r *Ring) findNextPartitionPostion() int {
+	var last uint64
+
+	for i := 0; i < numNodes && i < len(r.tokens); i++ {
+		if i == 0 {
+			last = r.tokens[i].id
+		} else {
+			if r.tokens[i].id - last > math.MaxUint64 / numPartitions {
+				return i
+			} else if i == numNodes - 1 {
+				panic("ring full")
+			}
+			last = r.tokens[i].id
+		}
+	}
+	return 0
+}
+
 func (r *Ring) AddNode(id string) {
 	node := NewNode(id)
+	partPos := r.findNextPartitionPostion()
 	for i := 0; i < tokensPerNode; i++ {
 		var t Token
-		t.id = rand.Uint64()
+		t.id = uint64(i) * (math.MaxUint64 / uint64(tokensPerNode)) +
+			uint64(partPos) * (math.MaxUint64 / numPartitions)
 		t.node = node
 		r.tokens = append(r.tokens, t)
 	}
@@ -71,6 +93,7 @@ func (r *Ring) AddNode(id string) {
 }
 
 func (r *Ring) DeleteNode(id string) {
+	fmt.Println("Deleting", id)
 	for i := 0; i < len(r.tokens); i++ {
 		if r.tokens[i].node.id == id {
 			r.tokens = append(r.tokens[:i], r.tokens[i+1:]...)
@@ -154,8 +177,7 @@ func main() {
 	r.PrintLocation("Tim")
 	r.PrintLocation("Alex")
 
-	fmt.Println("Deleting C")
-	r.DeleteNode("C")
+	r.DeleteNode("D")
 
 	r.PrintLocation("Maria")
 	r.PrintLocation("John")
