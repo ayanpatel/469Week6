@@ -4,13 +4,14 @@
 package main
 
 import (
-	"fmt"
-	"sort"
 	"crypto/md5"
 	"encoding/binary"
+	"fmt"
+	"math/rand"
+	"sort"
 )
 
-const numNodes = 5
+const tokensPerNode = 4
 
 type message struct {
 	dest string
@@ -19,15 +20,25 @@ type message struct {
 }
 
 type Ring struct {
-	Nodes Nodes
+	tokens TokenList
 	messageChan chan message
 }
 
-type Nodes []*Node
+type Token struct {
+	id uint64
+	node *Node
+}
+
+type TokenList []Token
 
 type Node struct {
-	Id string
-	HashId uint64
+	id string
+}
+
+func (r *Ring) printTokens() {
+	for i := 0; i < len(r.tokens); i++ {
+		fmt.Println(r.tokens[i].id, r.tokens[i].node.id)
+	}
 }
 
 func hashId(key string) uint64 {
@@ -37,53 +48,62 @@ func hashId(key string) uint64 {
 }
 
 func NewRing() *Ring {
-	return &Ring{Nodes : Nodes{}, messageChan : make(chan message, 32)}
+	return &Ring{tokens : []Token{},
+		messageChan : make(chan message, 32)}
 }
 
 func NewNode(id string) *Node {
-	return &Node{Id : id, HashId: hashId(id)}
+	n := new(Node)
+	n.id = id
+	return n
 }
 
 func (r *Ring) AddNode(id string) {
 	node := NewNode(id)
-	r.Nodes = append(r.Nodes, node)
-	sort.Sort(r.Nodes)
+	for i := 0; i < tokensPerNode; i++ {
+		var t Token
+		t.id = rand.Uint64()
+		t.node = node
+		r.tokens = append(r.tokens, t)
+	}
+	sort.Sort(r.tokens)
 	go nodeRoutine(id, r.messageChan)
 }
 
 func (r *Ring) DeleteNode(id string) {
-	i := r.search(id)
-	if i >= r.Nodes.Len() || r.Nodes[i].Id != id {
-		fmt.Println("node not found")
+	for i := 0; i < len(r.tokens); i++ {
+		if r.tokens[i].node.id == id {
+			r.tokens = append(r.tokens[:i], r.tokens[i+1:]...)
+			i-- //gotta check this one again since we just modified the list
+		}
 	}
-	r.Nodes = append(r.Nodes[:i], r.Nodes[i+1:]...)
 }
 
-func (n Nodes) Len() int {
-	return len(n)
+func (t TokenList) Len() int {
+	return len(t)
 }
 
-func (n Nodes) Less(i, j int) bool {
-	return n[i].HashId < n[j].HashId
+func (t TokenList) Less(i, j int) bool {
+	return t[i].id < t[j].id
 }
 
-func (n Nodes) Swap(i, j int) {
-	n[i], n[j] = n[j], n[i]
+func (t TokenList) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
 }
 
 func (r *Ring) search(id string) int {
 	searchFn := func(i int) bool {
-		return r.Nodes[i].HashId >= hashId(id)
+		return r.tokens[i].id >= hashId(id)
 	}
-	return sort.Search(r.Nodes.Len(), searchFn)
+	return sort.Search(r.tokens.Len(), searchFn)
 }
 
 func (r *Ring) Get(key string) string {
 	i := r.search(key)
-	if i >= r.Nodes.Len() {
+	if i >= r.tokens.Len() {
 		i = 0
 	}
-	return r.Nodes[i].Id
+	return r.tokens[i].node.id
 }
 
 func (r *Ring) Put(key string, value int) {
@@ -110,6 +130,10 @@ func nodeRoutine(id string, messageChan chan message) {
 	}
 }
 
+func (r *Ring) PrintLocation(key string) {
+	fmt.Println(key, "is on server", r.Get(key))
+}
+
 func main() {
 	r := NewRing()
 	r.AddNode("A")
@@ -118,13 +142,24 @@ func main() {
 	r.AddNode("D")
 	r.AddNode("E")
 
-	r.Put("Maria", 10)
+	r.Put("Maria", 100)
+	r.Put("John", 20)
+	r.Put("Anna", 40)
+	r.Put("Tim", 100)
+	r.Put("Alex", 10)
 
-	n_id := r.Get("Maria")
-	fmt.Println("Maria at node", n_id)
+	r.PrintLocation("Maria")
+	r.PrintLocation("John")
+	r.PrintLocation("Anna")
+	r.PrintLocation("Tim")
+	r.PrintLocation("Alex")
 
-	r.DeleteNode("E")
+	fmt.Println("Deleting C")
+	r.DeleteNode("C")
 
-	n_id = r.Get("Maria")
-	fmt.Println("Maria at node", n_id)
+	r.PrintLocation("Maria")
+	r.PrintLocation("John")
+	r.PrintLocation("Anna")
+	r.PrintLocation("Tim")
+	r.PrintLocation("Alex")
 }
